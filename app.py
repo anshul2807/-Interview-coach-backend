@@ -1,13 +1,3 @@
-"""
-🎯 RAG Interview Question Retrieval API
-========================================
-FastAPI server that loads the pre-built ChromaDB vector store from ./chroma_db
-and serves interview questions based on user resume data.
-
-Run:  uvicorn app:app --reload --port 8000
-Docs: http://localhost:8000/docs
-"""
-
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -21,9 +11,6 @@ import chromadb
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
-# ─────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────
 CHROMA_PERSIST_DIR = "./chroma_db"
 COLLECTION_NAME    = "interview_questions"
 EMBEDDING_DIM      = 384
@@ -31,31 +18,20 @@ EMBEDDING_DIM      = 384
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────
-# Global references (set during lifespan)
-# ─────────────────────────────────────────────
-embed_fn: ONNXMiniLM_L6_V2 = None  # type: ignore
+embed_fn: ONNXMiniLM_L6_V2 = None  
 collection = None
 
-
-# ─────────────────────────────────────────────
-# Lifespan
-# ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load ONNX embedding function + ChromaDB collection at startup."""
     global embed_fn, collection
 
-    # ── Load ONNX embedding function (auto-downloads model on first run) ──
     logger.info("Initialising ONNXMiniLM_L6_V2 embedding function...")
     embed_fn = ONNXMiniLM_L6_V2()
 
-    # Smoke-test
     test = embed_fn(["hello world"])
     assert len(test[0]) == EMBEDDING_DIM, f"Unexpected embedding dim: {len(test[0])}"
     logger.info(f"Embedding function ready — dim: {EMBEDDING_DIM}")
 
-    # ── Connect to persisted ChromaDB ──
     if not os.path.exists(CHROMA_PERSIST_DIR):
         raise RuntimeError(
             f"ChromaDB persist directory not found: {CHROMA_PERSIST_DIR}\n"
@@ -80,14 +56,10 @@ async def lifespan(app: FastAPI):
         f"ChromaDB loaded — collection '{COLLECTION_NAME}' with {collection.count():,} documents"
     )
 
-    yield  # ← app is running
+    yield
 
     logger.info("Shutting down...")
 
-
-# ─────────────────────────────────────────────
-# FastAPI App
-# ─────────────────────────────────────────────
 app = FastAPI(
     title="RAG Interview Prep API",
     description=(
@@ -106,17 +78,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ─────────────────────────────────────────────
-# Pydantic Models
-# ─────────────────────────────────────────────
 class ProjectInfo(BaseModel):
     name: str = Field(..., example="E-commerce Platform")
     points: str = Field(
         ..., example="Built full-stack app with cart, payment, admin dashboard"
     )
     tech_used: list[str] = Field(..., example=["react", "node.js", "mongodb"])
-
 
 class ExperienceInfo(BaseModel):
     company_name: str = Field(..., example="Infosys")
@@ -125,10 +92,7 @@ class ExperienceInfo(BaseModel):
         ..., example="Developed RESTful APIs for banking application"
     )
 
-
 class ResumeInput(BaseModel):
-    """User resume information for personalized question retrieval."""
-
     experience: str = Field(
         ...,
         description="Years of experience: '0', '0-1', '1-3', '3-5', '5+'",
@@ -165,7 +129,6 @@ class ResumeInput(BaseModel):
         description="Number of questions per difficulty level per chunk",
     )
 
-
 class QuestionItem(BaseModel):
     question: str
     company: str
@@ -174,13 +137,11 @@ class QuestionItem(BaseModel):
     exp_level: str
     similarity_score: float
 
-
 class Chunk(BaseModel):
     chunk_number: int
     easy: list[QuestionItem]
     medium: list[QuestionItem]
     hard: list[QuestionItem]
-
 
 class RetrievalResponse(BaseModel):
     query_text: str
@@ -188,17 +149,8 @@ class RetrievalResponse(BaseModel):
     total_questions: int
     chunks: list[Chunk]
 
-
-# ─────────────────────────────────────────────
-# Core Logic
-# ─────────────────────────────────────────────
 def build_query_from_resume(resume: ResumeInput) -> str:
-    """
-    Convert structured resume data into a single semantic query string
-    that can be embedded and compared against the vector DB.
-    """
     parts = []
-
     parts.append(f"experience level: {resume.experience} years")
 
     if resume.company_looking:
@@ -234,15 +186,8 @@ def build_query_from_resume(resume: ResumeInput) -> str:
 
     return ". ".join(parts)
 
-
 def retrieve_questions(resume: ResumeInput) -> RetrievalResponse:
-    """
-    Retrieve interview questions from ChromaDB based on user resume.
-    Returns chunks, each containing easy + medium + hard questions.
-    """
     query_text = build_query_from_resume(resume)
-
-    # Embed query using ONNXMiniLM_L6_V2 — returns list[list[float]]
     query_embedding = embed_fn([query_text])
 
     company = (resume.company_looking or "").lower().strip()
@@ -332,13 +277,8 @@ def retrieve_questions(resume: ResumeInput) -> RetrievalResponse:
         chunks=chunks,
     )
 
-
-# ─────────────────────────────────────────────
-# Endpoints
-# ─────────────────────────────────────────────
 @app.get("/")
 async def root():
-    """Health check & info."""
     doc_count = collection.count() if collection else 0
     return {
         "status": "running",
@@ -348,15 +288,8 @@ async def root():
         "docs_url": "/docs",
     }
 
-
 @app.post("/retrieve", response_model=RetrievalResponse)
 async def retrieve(resume: ResumeInput):
-    """
-    🎯 Retrieve interview questions based on user resume.
-
-    Returns questions grouped in chunks — each chunk contains
-    **easy**, **medium**, and **hard** questions.
-    """
     if collection is None:
         raise HTTPException(status_code=503, detail="Vector store not loaded")
 
@@ -366,10 +299,8 @@ async def retrieve(resume: ResumeInput):
         logger.error(f"Retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/stats")
 async def stats():
-    """Collection statistics."""
     if collection is None:
         raise HTTPException(status_code=503, detail="Vector store not loaded")
 
