@@ -1,0 +1,11 @@
+.env
+myenv
+
+
+myenv/
+venv/
+env/
+.venv/
+
+
+chroma_db/
